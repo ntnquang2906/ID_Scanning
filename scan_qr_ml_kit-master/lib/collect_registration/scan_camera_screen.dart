@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:google_mlkit_entity_extraction/google_mlkit_entity_extraction.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 class ScanCameraScreen extends StatefulWidget {
@@ -69,23 +70,58 @@ class _ScanCameraScreenState extends State<ScanCameraScreen> {
     }
   }
 
-  Future<void> _scanText(File imageFile) async {
-    final inputImage = InputImage.fromFile(imageFile);
-    final textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
-    final RecognizedText recognizedText =
-        await textRecognizer.processImage(inputImage);
+   Future<void> _scanText(File imageFile) async {
+  final inputImage = InputImage.fromFile(imageFile);
+  final textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
+  final RecognizedText recognizedText =
+      await textRecognizer.processImage(inputImage);
+  final rawText = recognizedText.text.toUpperCase();
 
-    final rawText = recognizedText.text.toUpperCase();
+  if (rawText.contains('DRIVER LICENCE') &&
+      rawText.contains('LICENCE NO') &&
+      rawText.contains('DATE OF BIRTH')) {
+    
+    final entityExtractor = EntityExtractor(language: EntityExtractorLanguage.english);
+    final extractedEntities = await entityExtractor.annotateText(rawText);
+    
+    Map<String, String> extractedData = {};
 
-    if (rawText.contains('DRIVER LICENCE') &&
-        rawText.contains('LICENCE NO') &&
-        rawText.contains('DATE OF BIRTH')) {
-      textRecognizer.close();
-      final textSplit = rawText.split(RegExp(r'\r?\n'));
-      Navigator.pop(context, textSplit);
+    for (final entity in extractedEntities) {
+      for (final annotation in entity.entities) {
+        switch (annotation.type) {
+          case EntityType.address:
+            extractedData['Address'] = entity.text;
+            break;
+          case EntityType.dateTime:
+            extractedData['DOB'] = entity.text;
+            break;
+          default:
+            break;
+        }
+      }
     }
-    isBlocked = false;
+
+    // Extract License Number using Regex
+    RegExp licenseRegExp = RegExp(r'\b\d{1} \d{3} \d{3} \d{3}\b');
+    Match? match = licenseRegExp.firstMatch(rawText);
+    if (match != null) {
+      extractedData['License Number'] = match.group(0)!;
+    }
+
+    // Extract Name using Regex (Assuming Name is in "LASTNAME FIRSTNAME" Format)
+    RegExp nameRegExp = RegExp(r'^[A-Z]+ [A-Z]+$', multiLine: true);
+    Iterable<Match> nameMatches = nameRegExp.allMatches(rawText);
+    if (nameMatches.isNotEmpty) {
+      extractedData['Name'] = nameMatches.first.group(0)!;
+    }
+
+    textRecognizer.close();
+    entityExtractor.close();
+    
+    Navigator.pop(context, extractedData);
   }
+  isBlocked = false;
+}
 
   @override
   void dispose() {
